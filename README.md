@@ -85,19 +85,20 @@ xml文件中包含以下字段：
 最终数据集文件组织结构为：
 
 ```
-├── annotations
-│   ├── fire_000001.xml
-│   ├── fire_000002.xml
-│   ├── fire_000003.xml
-│   |   ...
-├── images
-│   ├── fire_000001.jpg
-│   ├── fire_000003.jpg
-│   ├── fire_000003.jpg
-│   |   ...
-├── label_list.txt
-├── train.txt
-└── valid.txt
+ ├── dataset
+	├── annotations
+  │   ├── fire_000001.xml
+  │   ├── fire_000002.xml
+  │   ├── fire_000003.xml
+  │   |   ...
+  ├── images
+  │   ├── fire_000001.jpg
+  │   ├── fire_000003.jpg
+  │   ├── fire_000003.jpg
+  │   |   ...
+  ├── label_list.txt
+  ├── train.txt
+  └── valid.txt
 ```
 
 <a name="模型选择"></a>
@@ -134,7 +135,7 @@ PaddleX提供了5种目标检测模型：FasterRCNN、YOLOV3、PPYOVO、PPYOLOv2
   * 更大的batch size
   * 量化后压缩
 
-根据部署场景，这里我们选择了速度快精度高的PPYOLOV2算法进行火灾和烟雾检测。
+根据部署场景，这里我们选择了双阶段的Faster RCNN算法进行火灾和烟雾检测。
 
 <a name="模型训练"></a>
 
@@ -162,17 +163,36 @@ python -m paddle.distributed.launch --gpus 0,1 train.py
 
 ### 7.1 精度优化
 
-本小节侧重展示在模型迭代过程中优化精度的思路，在本案例中，有些优化策略获得了精度收益，而有些没有。在其他质检场景中，可根据实际情况尝试这些优化策略。点击文档[精度优化](./accuracy_improvement.md)查看。
+本小节侧重展示在模型迭代过程中优化精度的思路，在本案例中，有些优化策略获得了精度收益，而有些没有。在其他质检场景中，可根据实际情况尝试这些优化策略，具体请参考[模型优化文档](./accuracy_improvement_frcnn.md)
 
-### 7.2 性能优化
+采用PaddleX在Tesla V100上测试模型的推理时间（输入数据拷贝至GPU的时间、计算时间、数据拷贝至CPU的时间），推理时间如下表所示：（**20次推理取平均耗时**）
 
-在完成模型精度优化之后，从以下两个方面对模型进行加速：
+由于参与推理的图片较大，因此预处理时间在**Resize处**会消耗较多的时间。
 
-#### (1) 减少FPN部分的通道数量
+| 模型                              | 推理时间（FPS） | Recall | Error Rate |
+| --------------------------------- | --------------- | ------ | ---------- |
+| PPYOLOV2+ResNet50_vd_dcn+SPP=True | 22              | 96.3   | 11.1       |
+| PPYOLO+ResNet50_vd_dcn            | 20              | 90.0   | 8.81       |
+| YOLOV3+DarkNet53+img_size(640)    | 21              | 88.4   | 6.01       |
+| FasterRCNN+ResNet50               | 17              | 96.7   | 8.1        |
+| FasterRCNN+ResNet50+DCN           | 17              | 94.5   | 7.6        |
 
-#### (2) 减少测试阶段的候选框数量
+注意:
 
-### 7.3 最终方案
+- **608**的图像大小，一般使用默认的anchors进行训练和推理即可。
+
+**优化进展说明**：
+
+- 1.通过选择更好的检测架构可以提高检测的Recall值——即**Neck，Head部分的优化**可以提高Recall，但是Error Rate也有了一定的增长。<**YOLOV3 到 PPYOLOV2**>
+- 2.两阶段算法相较于单阶段算法在检测精度上更加准确，Recall和Error Rate都有了显著提升，但是推理时间也会相应增加。<**PPYOLOv2到FasterRCNN**>
+- 3.通过FasterRCNN的两个实验可以看到，**加入可变形卷积DCN后，Error Rate可以得到微小的改善，但是Recall下降明显**。因此综合考虑后采用不添加DCN的模型。
+
+通过以上的简单优化方式，获取了两个较好的模型结果：【前者模型**速度更快**】
+
+| 模型                              | 推理时间（FPS） | Recall | Error Rate |
+| --------------------------------- | --------------- | ------ | ---------- |
+| PPYOLOV2+ResNet50_vd_dcn+SPP=True | 22              | 96.3   | 11.1       |
+| FasterRCNN                        | 17              | 96.7   | 8.1        |
 
 <a name="模型评估"></a>
 
